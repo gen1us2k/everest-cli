@@ -30,13 +30,15 @@ to quickly create a Cobra application.`,
 		if err != nil {
 			os.Exit(1)
 		}
-		fmt.Println(c)
 		cli, err := cli.New(c)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		_ = cli
+		if err := cli.ProvisionCluster(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	},
 }
 
