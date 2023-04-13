@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/gen1us2k/everest-provisioner/config"
+	"github.com/gen1us2k/everest-provisioner/pkg/cli"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -24,7 +25,19 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) {
+		c, err := config.ParseConfig()
+		if err != nil {
+			os.Exit(1)
+		}
+		fmt.Println(c)
+		cli, err := cli.New(c)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		_ = cli
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -34,11 +47,6 @@ func Execute() {
 	if err != nil {
 		os.Exit(1)
 	}
-	c, err := config.ParseConfig()
-	if err != nil {
-		os.Exit(1)
-	}
-	fmt.Println(c)
 }
 
 func init() {
