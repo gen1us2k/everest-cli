@@ -35,10 +35,14 @@ to quickly create a Cobra application.`,
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		if err := cli.ProvisionCluster(); err != nil {
+		if err := cli.ProvisionPMM(); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+		//if err := cli.ProvisionCluster(); err != nil {
+		//	fmt.Println(err)
+		//	os.Exit(1)
+		//}
 	},
 }
 
@@ -60,8 +64,16 @@ func init() {
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolP("enable_monitoring", "m", true, "Enable monitoring")
-	viper.BindPFlag("enable_monitoring", rootCmd.Flags().Lookup("enable_monitoring"))
+	rootCmd.Flags().BoolP("monitoring.enabled", "m", true, "Enable monitoring")
+	viper.BindPFlag("monitoring.enabled", rootCmd.Flags().Lookup("monitoring.enabled"))
+	rootCmd.Flags().StringP("monitoring.type", "", "pmm", "Monitoring type")
+	viper.BindPFlag("monitoring.type", rootCmd.Flags().Lookup("monitoring.type"))
+	rootCmd.Flags().StringP("monitoring.pmm.endpoint", "", "http://127.0.0.1", "PMM endpoint URL")
+	viper.BindPFlag("monitoring.pmm.endpoint", rootCmd.Flags().Lookup("monitoring.pmm.endpoint"))
+	rootCmd.Flags().StringP("monitoring.pmm.username", "", "admin", "PMM username")
+	viper.BindPFlag("monitoring.pmm.username", rootCmd.Flags().Lookup("monitoring.pmm.username"))
+	rootCmd.Flags().StringP("monitoring.pmm.password", "", "password", "PMM password")
+	viper.BindPFlag("monitoring.pmm.password", rootCmd.Flags().Lookup("monitoring.pmm.password"))
 	rootCmd.Flags().BoolP("enable_backup", "b", false, "Enable backups")
 	viper.BindPFlag("enable_backup", rootCmd.Flags().Lookup("enable_backup"))
 	rootCmd.Flags().BoolP("install_olm", "o", true, "Install OLM")

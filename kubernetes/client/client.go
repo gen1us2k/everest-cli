@@ -31,6 +31,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	vmClient "github.com/VictoriaMetrics/operator/api/client/versioned"
+	vmv1beta1 "github.com/VictoriaMetrics/operator/api/victoriametrics/v1beta1"
+
 	"github.com/gen1us2k/everest-provisioner/kubernetes/client/database"
 	v1 "github.com/operator-framework/api/pkg/operators/v1"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -1058,4 +1061,67 @@ func (c *Client) ListCRs(
 	}
 
 	return c.dynamicClientset.Resource(gvr).Namespace(namespace).List(ctx, options)
+}
+
+// GetClusterServiceVersion retrieve a CSV by namespaced name.
+func (c *Client) GetClusterServiceVersion(ctx context.Context, key types.NamespacedName) (*v1alpha1.ClusterServiceVersion, error) {
+	operatorClient, err := versioned.NewForConfig(c.restConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot create an operator client instance")
+	}
+
+	return operatorClient.OperatorsV1alpha1().ClusterServiceVersions(key.Namespace).Get(ctx, key.Name, metav1.GetOptions{})
+}
+
+// ListClusterServiceVersion list all CSVs for the given namespace.
+func (c *Client) ListClusterServiceVersion(ctx context.Context, namespace string) (*v1alpha1.ClusterServiceVersionList, error) {
+	operatorClient, err := versioned.NewForConfig(c.restConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot create an operator client instance")
+	}
+
+	return operatorClient.OperatorsV1alpha1().ClusterServiceVersions(namespace).List(ctx, metav1.ListOptions{})
+}
+
+// DeleteFile accepts manifest file contents parses into []runtime.Object
+// and deletes them from the cluster
+func (c *Client) DeleteFile(fileBytes []byte) error {
+	objs, err := c.getObjects(fileBytes)
+	if err != nil {
+		return err
+	}
+	for i := range objs {
+		err := c.DeleteObject(objs[i])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListVMAgents retrieves all VM agents for a namespace.
+func (c *Client) ListVMAgents(ctx context.Context, namespace string, labels map[string]string) (*vmv1beta1.VMAgentList, error) {
+	vmcli, err := vmClient.NewForConfig(c.restConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := metav1.ListOptions{}
+	if labels != nil {
+		opts.LabelSelector = metav1.FormatLabelSelector(&metav1.LabelSelector{
+			MatchLabels: labels,
+		})
+	}
+
+	return vmcli.VictoriametricsV1beta1().VMAgents(namespace).List(ctx, metav1.ListOptions{})
+}
+
+// DeleteVMAgent deletes a Victoria Metrics agent instance.
+func (c *Client) DeleteVMAgent(ctx context.Context, namespace, name string) error {
+	vmcli, err := vmClient.NewForConfig(c.restConfig)
+	if err != nil {
+		return err
+	}
+
+	return vmcli.VictoriametricsV1beta1().VMAgents(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }

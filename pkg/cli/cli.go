@@ -1,7 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
 	"os"
 
 	"github.com/gen1us2k/everest-provisioner/config"
@@ -100,7 +106,7 @@ func (c *CLI) ProvisionCluster() error {
 		return err
 	}
 	c.l.Info("DBaaS operator has been installed")
-	if c.config.EnableMonitoring {
+	if c.config.Monitoring.Enabled {
 		c.l.Info("Started setting up monitoring")
 		if err := c.provisionPMMMonitoring(); err != nil {
 			return err
@@ -110,4 +116,53 @@ func (c *CLI) ProvisionCluster() error {
 }
 func (c *CLI) provisionPMMMonitoring() error {
 	return nil
+}
+func (c *CLI) ProvisionPMM() error {
+	account := fmt.Sprintf("dbaas-service-account-%d", rand.Int63())
+	token, err := c.createAdminToken(account, "")
+	if err != nil {
+		return err
+	}
+	err = c.kubeClient.ProvisionMonitoring(account, token, c.config.Monitoring.PMM.Endpoint)
+
+	return err
+}
+func (c *CLI) createAdminToken(name string, token string) (string, error) {
+	apiKey := map[string]string{
+		"name": name,
+		"role": "Admin",
+	}
+	b, err := json.Marshal(apiKey)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(b))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/graph/api/auth/keys", c.config.Monitoring.PMM.Endpoint), bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	if token == "" {
+		req.SetBasicAuth(c.config.Monitoring.PMM.Username, c.config.Monitoring.PMM.Password)
+	} else {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	}
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(resp.StatusCode)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	fmt.Println(string(data))
+	if err != nil {
+		return "", err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return "", err
+	}
+	return m["key"].(string), nil
+
 }

@@ -19,6 +19,7 @@ package kubernetes
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,16 +30,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AlekSi/pointer"
+	victoriametricsv1beta1 "github.com/VictoriaMetrics/operator/api/v1beta1"
 	"github.com/gen1us2k/everest-provisioner/data"
 	"github.com/gen1us2k/everest-provisioner/kubernetes/client"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
+
 	dbaasv1 "github.com/percona/dbaas-operator/api/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -678,4 +684,165 @@ func (k *Kubernetes) UpgradeOperator(ctx context.Context, namespace, name string
 // GetServerVersion returns server version
 func (k *Kubernetes) GetServerVersion() (*version.Info, error) {
 	return k.client.GetServerVersion()
+}
+
+// GetClusterServiceVersion retrieves a ClusterServiceVersion by namespaced name.
+func (k *Kubernetes) GetClusterServiceVersion(ctx context.Context, key types.NamespacedName) (*v1alpha1.ClusterServiceVersion, error) {
+	k.lock.RLock()
+	defer k.lock.RUnlock()
+	return k.client.GetClusterServiceVersion(ctx, key)
+}
+
+// ListClusterServiceVersion list all CSVs for the given namespace.
+func (k *Kubernetes) ListClusterServiceVersion(ctx context.Context, namespace string) (*v1alpha1.ClusterServiceVersionList, error) {
+	k.lock.RLock()
+	defer k.lock.RUnlock()
+	return k.client.ListClusterServiceVersion(ctx, namespace)
+}
+
+// DeleteObject deletes an object.
+func (k *Kubernetes) DeleteObject(obj runtime.Object) error {
+	k.lock.RLock()
+	defer k.lock.RUnlock()
+	return k.client.DeleteObject(obj)
+}
+
+// and creates a VM Agent instance.
+func (k *Kubernetes) ProvisionMonitoring(login, password, pmmPublicAddress string) error {
+	randomCrypto, err := rand.Prime(rand.Reader, 64)
+	if err != nil {
+		return err
+	}
+
+	secretName := fmt.Sprintf("vm-operator-%d", randomCrypto)
+	err = k.CreatePMMSecret(secretName, map[string][]byte{
+		"username": []byte(login),
+		"password": []byte(password),
+	})
+	if err != nil {
+		return err
+	}
+
+	vmagent := vmAgentSpec(secretName, pmmPublicAddress)
+	err = k.client.ApplyObject(vmagent)
+	if err != nil {
+		return errors.Wrap(err, "cannot apply vm agent spec")
+	}
+
+	files := []string{
+		"crds/victoriametrics/crs/vmagent_rbac.yaml",
+		"crds/victoriametrics/crs/vmnodescrape.yaml",
+		"crds/victoriametrics/crs/vmpodscrape.yaml",
+		"crds/victoriametrics/kube-state-metrics/service-account.yaml",
+		"crds/victoriametrics/kube-state-metrics/cluster-role.yaml",
+		"crds/victoriametrics/kube-state-metrics/cluster-role-binding.yaml",
+		"crds/victoriametrics/kube-state-metrics/deployment.yaml",
+		"crds/victoriametrics/kube-state-metrics/service.yaml",
+		"crds/victoriametrics/kube-state-metrics.yaml",
+	}
+	for _, path := range files {
+		file, err := data.OLMCRDs.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// retry 3 times because applying vmagent spec might take some time.
+		for i := 0; i < 3; i++ {
+			err = k.client.ApplyFile(file)
+			if err != nil {
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			break
+		}
+		if err != nil {
+			return errors.Wrapf(err, "cannot apply file: %q", path)
+		}
+	}
+	return nil
+}
+
+// CleanupMonitoring remove all files installed by ProvisionMonitoring.
+func (k *Kubernetes) CleanupMonitoring() error {
+	files := []string{
+		"crds/victoriametrics/kube-state-metrics.yaml",
+		"crds/victoriametrics/kube-state-metrics/cluster-role-binding.yaml",
+		"crds/victoriametrics/kube-state-metrics/cluster-role.yaml",
+		"crds/victoriametrics/kube-state-metrics/deployment.yaml",
+		"crds/victoriametrics/kube-state-metrics/service-account.yaml",
+		"crds/victoriametrics/kube-state-metrics/service.yaml",
+		"crds/victoriametrics/crs/vmagent_rbac.yaml",
+		"crds/victoriametrics/crs/vmnodescrape.yaml",
+		"crds/victoriametrics/crs/vmpodscrape.yaml",
+	}
+	for _, path := range files {
+		file, err := data.OLMCRDs.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		err = k.client.DeleteFile(file)
+		if err != nil {
+			return errors.Wrapf(err, "cannot apply file: %q", path)
+		}
+	}
+
+	return nil
+}
+
+func vmAgentSpec(secretName, address string) *victoriametricsv1beta1.VMAgent {
+	return &victoriametricsv1beta1.VMAgent{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "VMAgent",
+			APIVersion: "operator.victoriametrics.com/v1beta1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pmm-vmagent-" + secretName,
+		},
+		Spec: victoriametricsv1beta1.VMAgentSpec{
+			ServiceScrapeNamespaceSelector: &metav1.LabelSelector{},
+			ServiceScrapeSelector:          &metav1.LabelSelector{},
+			PodScrapeNamespaceSelector:     &metav1.LabelSelector{},
+			PodScrapeSelector:              &metav1.LabelSelector{},
+			ProbeSelector:                  &metav1.LabelSelector{},
+			ProbeNamespaceSelector:         &metav1.LabelSelector{},
+			StaticScrapeSelector:           &metav1.LabelSelector{},
+			StaticScrapeNamespaceSelector:  &metav1.LabelSelector{},
+			ReplicaCount:                   pointer.ToInt32(1),
+			SelectAllByDefault:             true,
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("250m"),
+					corev1.ResourceMemory: resource.MustParse("350Mi"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("850Mi"),
+				},
+			},
+			ExtraArgs: map[string]string{
+				"memory.allowedPercent": "40",
+			},
+			RemoteWrite: []victoriametricsv1beta1.VMAgentRemoteWriteSpec{
+				{
+					URL: fmt.Sprintf("%s/victoriametrics/api/v1/write", address),
+					TLSConfig: &victoriametricsv1beta1.TLSConfig{
+						InsecureSkipVerify: true,
+					},
+					BasicAuth: &victoriametricsv1beta1.BasicAuth{
+						Username: corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: secretName,
+							},
+							Key: "username",
+						},
+						Password: corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: secretName,
+							},
+							Key: "password",
+						},
+					},
+				},
+			},
+		},
+	}
 }
