@@ -106,6 +106,18 @@ func (c *CLI) ProvisionCluster() error {
 		return err
 	}
 	c.l.Info("DBaaS operator has been installed")
+	c.l.Info("Installing PG operator")
+	channel, ok = os.LookupEnv("DBAAS_PG_OP_CHANNEL")
+	if !ok || channel == "" {
+		channel = "stable-v2"
+	}
+	params.Name = "percona-postgresql-operator"
+	params.Channel = channel
+	if err := c.kubeClient.InstallOperator(ctx, params); err != nil {
+		c.l.Error("failed installing PG operator")
+		return err
+	}
+	c.l.Info("PG operator has been installed")
 	if c.config.Monitoring.Enabled {
 		c.l.Info("Started setting up monitoring")
 		if err := c.provisionPMMMonitoring(); err != nil {
