@@ -3,9 +3,12 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"os"
@@ -138,6 +141,36 @@ func (c *CLI) ProvisionPMM() error {
 	err = c.kubeClient.ProvisionMonitoring(account, token, c.config.Monitoring.PMM.Endpoint)
 
 	return err
+}
+func (c *CLI) ConnectDBaaS() error {
+	data, err := ioutil.ReadFile("/Users/gen1us2k/.kube/config")
+	if err != nil {
+		return err
+	}
+	enc := base64.StdEncoding.EncodeToString(data)
+	payload := map[string]string{
+		"name":       "minikube",
+		"kubeconfig": enc,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, "http://localhost:8080/k8s", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	//req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errors.New("non 200 status code")
+	}
+	return nil
+
 }
 func (c *CLI) createAdminToken(name string, token string) (string, error) {
 	apiKey := map[string]string{
