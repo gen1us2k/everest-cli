@@ -109,42 +109,53 @@ func (c *CLI) ProvisionCluster() error {
 		return err
 	}
 	c.l.Info("DBaaS operator has been installed")
-	c.l.Info("Installing PG operator")
-	channel, ok = os.LookupEnv("DBAAS_PG_OP_CHANNEL")
-	if !ok || channel == "" {
-		channel = "stable-v2"
-	}
-	params.Name = "percona-postgresql-operator"
-	params.Channel = channel
-	if err := c.kubeClient.InstallOperator(ctx, params); err != nil {
-		c.l.Error("failed installing PG operator")
-		return err
-	}
-	c.l.Info("PG operator has been installed")
+	//c.l.Info("Installing PG operator")
+	//channel, ok = os.LookupEnv("DBAAS_PG_OP_CHANNEL")
+	//if !ok || channel == "" {
+	//	channel = "stable-v2"
+	//}
+	//params.Name = "percona-postgresql-operator"
+	//params.Channel = channel
+	//if err := c.kubeClient.InstallOperator(ctx, params); err != nil {
+	//	c.l.Error("failed installing PG operator")
+	//	return err
+	//}
+	//c.l.Info("PG operator has been installed")
 	if c.config.Monitoring.Enabled {
 		c.l.Info("Started setting up monitoring")
 		if err := c.provisionPMMMonitoring(); err != nil {
 			return err
 		}
+		c.l.Info("Monitoring using PMM has been provisioned")
 	}
 	return nil
 }
 func (c *CLI) provisionPMMMonitoring() error {
-	return nil
-}
-func (c *CLI) ProvisionPMM() error {
 	account := fmt.Sprintf("dbaas-service-account-%d", rand.Int63())
-	token, err := c.createAdminToken(account, "")
+	c.l.Info("Creating a new service account in PMM")
+	token, err := c.provisionPMM(account)
 	if err != nil {
 		return err
 	}
+	c.l.Info("New token has been generated")
+	c.l.Info("Started provisioning monitoring in k8s cluster")
 	err = c.kubeClient.ProvisionMonitoring(account, token, c.config.Monitoring.PMM.Endpoint)
+	if err != nil {
+		c.l.Error("failed provisioning monitoring")
+		return err
+	}
 
-	return err
+	return nil
+}
+func (c *CLI) provisionPMM(account string) (string, error) {
+	token, err := c.createAdminToken(account, "")
+	return token, err
 }
 func (c *CLI) ConnectDBaaS() error {
+	c.l.Info("Generating service account and connecting with DBaaS")
 	data, err := ioutil.ReadFile("/Users/gen1us2k/.kube/config")
 	if err != nil {
+		c.l.Error("failed generating kubeconfig")
 		return err
 	}
 	enc := base64.StdEncoding.EncodeToString(data)
@@ -154,6 +165,7 @@ func (c *CLI) ConnectDBaaS() error {
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
+		c.l.Error("failed marshaling JSON")
 		return err
 	}
 	req, err := http.NewRequest(http.MethodPost, "http://localhost:8080/k8s", bytes.NewReader(b))
@@ -169,6 +181,7 @@ func (c *CLI) ConnectDBaaS() error {
 	if resp.StatusCode != http.StatusOK {
 		return errors.New("non 200 status code")
 	}
+	c.l.Info("DBaaS has been connected")
 	return nil
 
 }

@@ -35,18 +35,14 @@ to quickly create a Cobra application.`,
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		// if err := cli.ProvisionPMM(); err != nil {
-		// 	fmt.Println(err)
-		// 	os.Exit(1)
-		// }
 		if err := cli.ProvisionCluster(); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		// if err := cli.ConnectDBaaS(); err != nil {
-		// 	fmt.Println(err)
-		// 	os.Exit(1)
-		// }
+		if err := cli.ConnectDBaaS(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	},
 }
 
